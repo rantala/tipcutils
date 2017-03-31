@@ -453,7 +453,7 @@ int expand_arg(char *arg)
 }
 
 char *usage = "Usage:\n\
-       tipc-pipc <options> [address 1] [address 2]\n\
+       tipc-pipe <options> [address 1] [address 2]\n\
 \n\
 default address 1 is 0\n\
 default address 2 is same as address 1\n\
