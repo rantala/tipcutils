@@ -452,7 +452,7 @@ int expand_arg(char *arg)
 	return atoi(arg);
 }
 
-char *usage = "Usage:\n\
+const char usage[] = "Usage:\n\
        tipc-pipe <options> [address 1] [address 2]\n\
 \n\
 default address 1 is 0\n\
