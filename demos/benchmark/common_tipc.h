@@ -54,10 +54,13 @@
 #include <linux/tipc.h>
 #include <arpa/inet.h>  
 #include <netdb.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <sys/ioctl.h>
+#include <sys/epoll.h>
 #include <net/if.h>
 
-#define MAX_DELAY       300000		/* inactivity limit [in ms] */
+#define MAX_DELAY       3000000		/* inactivity limit [in ms] */
 #define MASTER_NAME     16666
 #define SRV_CTRL_NAME   17777
 #define SRV_LSTN_NAME   18888

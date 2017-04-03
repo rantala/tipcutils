@@ -67,11 +67,8 @@ static int master_clnt_sd;
 static int master_srv_sd;
 static uint client_id;
 static unsigned char *buf = NULL;
+static int non_blk = 0;
 static int select_ip(struct srv_info *sinfo, char *name);
-static void stream_messages(int peer_sd, int clnt_id,
-			    int msgcnt, int msglen,
-			    int bounce);
-
 
 #define CLNT_EXEC         3
 #define CLNT_TERM         4
@@ -160,7 +157,7 @@ static void master_from_srv(uint *cmd, struct srv_info *sinfo, __u32 *tipc_addr)
 
 	if (wait_for_msg(master_srv_sd))
 		die("Master: No info from server\n");
-	
+
 	if (sizeof(c) != recv(master_srv_sd, &c, sizeof(c), 0))
 		die("Master: Invalid info msg from server\n");
 	
@@ -175,9 +172,10 @@ static void usage(char *app)
 {
 	fprintf(stderr, "Usage:\n");
 	fprintf(stderr," %s ", app);
-	fprintf(stderr, "[-l [lat msgs]] [-t [<tput msgs>]]"
+	fprintf(stderr, "[-e] [-l [lat msgs]] [-t [<tput msgs>]]"
                          " [-c <num conns>] [-p <tipc | tcp>]"
 		         "[-i <ifname>]\n");
+	fprintf(stderr, "\tnon-blocking client/edge trigged epoll() (default: blocking/level trigged)\n");
 	fprintf(stderr, "\tmsgs to transfer for latency measurement (default %u)\n",
 		DEFAULT_LAT_MSGS);
 	fprintf(stderr, "\tmsgs to transfer for throughput measurement (default %u)\n",
@@ -224,21 +222,88 @@ static void print_latency_header(void)
 
 static const char *impstr[4] = {"LOW", "MEDIUM", "HIGH", "CRITICAL"};
 
-static void client_create(unsigned int clnt_id, ushort tcp_port, int tcp_addr)
+int set_non_block(int sd)
 {
-	int peer_sd;
+        int flags;
+
+        flags = fcntl(sd, F_GETFL, 0);
+        if (flags < 0)
+                return -1;
+        flags = O_NONBLOCK;
+        if (fcntl(sd, F_SETFL, flags) < 0)
+                return -1;
+        return sd;
+}
+
+void wait_for_cond(int efd, struct epoll_event *revents, int cond)
+{
+	while (!(revents->events & cond)) {
+		if (0 > epoll_wait(efd, revents, 100, 100000))
+			die("Client %u: epoll() failed\n", client_id);
+
+		if (revents->events & (EPOLLERR | EPOLLHUP))
+		    die("Client %u: epoll() revents %x\n",
+			client_id, revents->events);
+	}
+}
+
+void rcv_msg(int peer_sd, int efd, int msglen, struct epoll_event *revents)
+{
+	revents->events &= ~EPOLLIN;
+	wait_for_cond(efd, revents, EPOLLIN);
+	if (msglen == recv(peer_sd, buf, msglen, MSG_WAITALL))
+		return;
+	if (errno != EAGAIN)
+		die("Client %u: receive failed\n", client_id);
+}
+
+int snd_msg(int peer_sd, int efd, int msglen, struct epoll_event *revents)
+{
+	wait_for_cond(efd, revents, EPOLLOUT);
+	if (msglen == send(peer_sd, buf, msglen, 0))
+		return 1;
+	if (errno != EAGAIN)
+		die("Client %u: send failed\n", client_id);
+	revents->events &= ~EPOLLOUT;
+	return 0;
+}
+
+static void stream_messages(int peer_sd, int efd, int msgcnt,
+			    int msglen, int echo,
+			    struct epoll_event *revents)
+{
+	int sent = 0;
+	int yield = (1 << 21) / msglen;
+
+	while (sent < msgcnt) {
+		if (!(sent % yield))
+			sched_yield();
+		if (snd_msg(peer_sd, efd, msglen, revents)) {
+			sent++;
+			if (echo)
+				rcv_msg(peer_sd, efd, msglen, revents);
+		}
+	}
+}
+
+static void client_main(unsigned int clnt_id, ushort tcp_port, int tcp_addr)
+{
+	int peer_sd, efd = 0;
 	int imp = clnt_id % 4;
-	uint cmd, msglen, msgcnt, bounce;
+	uint cmd, msglen, msgcnt, echo;
+	struct epoll_event event, revents;
 	struct sockaddr_in tcp_dest;
+	int rc;
+
 	fflush(stdout);
 	if (fork())
 		return;
+
 	printf("Client %u created with importance %s\n", clnt_id, impstr[imp]);
 	client_id = clnt_id;
 	close(master_clnt_sd);
 	
 	/* Create socket for communication with master: */
-
 	master_sd = socket(AF_TIPC, SOCK_RDM, 0);
 	if (master_sd < 0)
 		die("Client %u: Can't create socket to master\n", clnt_id);
@@ -246,10 +311,15 @@ static void client_create(unsigned int clnt_id, ushort tcp_port, int tcp_addr)
 	if (bind(master_sd, (struct sockaddr *)&clnt_ctrl_addr, sizeof(clnt_ctrl_addr)))
 		die("Client %u: Failed to bind\n", clnt_id);
 
-	/* Establish connection to benchmark server */
+	/* Prepare epoll item */
+	efd = epoll_create1(0);
+	if (efd == -1)
+		die("epoll_create() failed\n");
 
+	event.events = EPOLLIN | EPOLLOUT | EPOLLHUP | EPOLLERR;
+	if (non_blk)
+		event.events |= EPOLLET;
 	if (!tcp_port) {
-
 		peer_sd = socket(AF_TIPC, SOCK_STREAM, 0);
 		if (peer_sd < 0)
 			die("Client %u: Can't create socket to server\n", clnt_id);
@@ -257,14 +327,21 @@ static void client_create(unsigned int clnt_id, ushort tcp_port, int tcp_addr)
 		if (setsockopt(peer_sd, SOL_TIPC, TIPC_IMPORTANCE,
 			       &imp, sizeof(imp)) != 0)
 			die("Client %u: Can't set socket options\n", clnt_id);
+		if (non_blk)
+			set_non_block(peer_sd);
+
+		/* Add socket to epoll item */
+		event.data.fd = peer_sd;
+		rc = epoll_ctl(efd, EPOLL_CTL_ADD, peer_sd, &event);
+		if (rc == -1)
+			die("epoll_ctl failure");
 
 		/* Establish connection to server */
-
-		if (connect(peer_sd, (struct sockaddr*)&srv_lstn_addr,
-			    sizeof(srv_lstn_addr)) < 0)
+		rc = connect(peer_sd, (struct sockaddr*)&srv_lstn_addr,
+			     sizeof(srv_lstn_addr));
+		if ((rc < 0) && (errno != EINPROGRESS))
 			die("Client %u: connect failed\n", clnt_id);
 	} else {
-
 		if ((peer_sd = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
 			die("TCP Server: failed to create client socket");
 		memset(&tcp_dest, 0, sizeof(tcp_dest));
@@ -272,64 +349,53 @@ static void client_create(unsigned int clnt_id, ushort tcp_port, int tcp_addr)
 		tcp_dest.sin_addr.s_addr = htonl(tcp_addr);
 		tcp_dest.sin_port = htons(tcp_port);
 		dprintf("TCP Client %u: using %s:%u \n", clnt_id,
-			inet_ntoa(tcp_dest.sin_addr),tcp_port);		
+			inet_ntoa(tcp_dest.sin_addr),tcp_port);
+
+		if (non_blk)
+			set_non_block(peer_sd);
+
+		/* Add socket to epoll item */
+		event.data.fd = peer_sd;
+		rc = epoll_ctl(efd, EPOLL_CTL_ADD, peer_sd, &event);
+		if (rc == -1)
+			die("epoll_ctl failure");
+
+		/* Establish connection to server */
 		if (0 > connect(peer_sd, (struct sockaddr *) &tcp_dest, 
 				sizeof(tcp_dest)))
 			die("TCP connect() failed");
 	}
 
+	/* Wait until connection is established */
+	rc = epoll_wait(efd, &revents, 100, -1);
+	if (rc < 0)
+		die("connect() epoll() failed %i\n", errno);
+
 	/* Notify master that we're ready to run tests */
 	client_to_master(CLNT_READY);
 
 	/* Process commands from client master until told to shut down */
-
 	for (;;) {
-		client_from_master(&cmd, &msglen, &msgcnt, &bounce);
+		client_from_master(&cmd, &msglen, &msgcnt, &echo);
 		if (cmd == CLNT_TERM) {
 			shutdown(peer_sd, SHUT_RDWR);
 			close(peer_sd);
 			close(master_sd);
 			exit(0);
 		}
-
 		/* Execute command */
-		stream_messages(peer_sd, client_id, msgcnt, msglen, bounce);
+		stream_messages(peer_sd, efd, msgcnt, msglen, echo, &revents);
 
 		/* Done. Tell master */
 		client_to_master(CLNT_FINISHED);
 	}
 }
 
-static void stream_messages(int peer_sd, int clnt_id, int msgcnt,
-			    int msglen, int bounce)
-{
-	int sent = 0;
-	int yield = (1 << 21) / msglen;
-	dprintf("Cli %u: bouncing %u msg of len %u, bounce = %u\n",
-		client_id, msgcnt,msglen,bounce);
-	while (sent < msgcnt) {
-		if (--yield == 0) {
-			sched_yield();
-			yield = (1 << 22) / msglen;
-		}
-		sent++;
-		if (msglen != send(peer_sd, buf, msglen, 0))
-			die("Client %u: send failed\n", clnt_id);
-
-		if (!bounce)
-			continue;
-
-		if (wait_for_msg(peer_sd))
-			die("Client %u: no resp from srv at %u\n", clnt_id, sent);
-			
-		if (msglen != recv(peer_sd, buf, msglen, MSG_WAITALL))
-			die("Client %u: invalid msg from server \n", clnt_id);
-	};
-	dprintf("cli %u: reporting FINISHED to master\n", clnt_id);
-}
-
 /*
- * Master
+ * The code below constitutes the 'Measuring Master' and controls
+ * which measurement cases the clients and servers should run.
+ * The master runs in (and is) the parent process
+ * All code above in this file runs in (client) child processes
  */
 int main(int argc, char *argv[], char *dummy[])
 {
@@ -357,8 +423,7 @@ int main(int argc, char *argv[], char *dummy[])
 	setbuf(stdout, NULL);
 
 	/* Process command line arguments */
-
-	while ((c = getopt(argc, argv, "l::t::c:p:m:i:")) != -1) {
+	while ((c = getopt(argc, argv, "l::t::c:p:m:i:n")) != -1) {
 		switch (c) {
 		case 'l':
 			if (optarg)
@@ -385,6 +450,9 @@ int main(int argc, char *argv[], char *dummy[])
 			else if (strcmp("tipc", optarg))
 				die("Invalid protocol; must be 'tcp' or 'tipc'\n");
 			break;
+		case 'n':
+			non_blk = 1;
+			break;
 		case 'i':
 			if (strcpy(ifname, optarg))
 				conn_typ = TCP_CONN;
@@ -402,7 +470,6 @@ int main(int argc, char *argv[], char *dummy[])
 		die("Unable to allocate buffer\n");
 
 	/* Create socket used to communicate with clients */
-
 	master_clnt_sd = socket(AF_TIPC, SOCK_RDM, 0);
 	if (master_clnt_sd < 0)
 		die("Master: Can't create client ctrl socket\n");
@@ -412,7 +479,6 @@ int main(int argc, char *argv[], char *dummy[])
 		die("Master: Failed to bind to clientcontrol address\n");
 
 	/* Create socket used to communicate with servers */
-
 	master_srv_sd = socket(AF_TIPC, SOCK_RDM, 0);
 	if (master_srv_sd < 0)
 		die("Master: Can't create server ctrl socket\n");
@@ -422,17 +488,18 @@ int main(int argc, char *argv[], char *dummy[])
 		die("Master: Failed to bind to server control address\n");
 
 	/* Wait for benchmark server to appear: */
-
 	wait_for_name(SRV_CTRL_NAME, 0, MAX_DELAY);
 	master_to_srv(RESTART, 0, 0, 0);
 	sleep(1);
 
 	/* Send connection type and buffer allocation size to server: */
 	master_to_srv(conn_typ, last_msglen, 0, 0);
-	wait_for_name(SRV_LSTN_NAME, 0, MAX_DELAY);
+	if (conn_typ == TCP_CONN)
+		sleep(1);
+	else
+		wait_for_name(SRV_LSTN_NAME, 0, MAX_DELAY);
 
-	/* Wait for ack */
-
+	/* Wait for ack from server */
 	master_from_srv(&cmd, &sinfo, &peer_tipc_addr);
 	if (peer_tipc_addr != own_node()) {
 		if (latency_transf == DEFAULT_LAT_MSGS)
@@ -453,7 +520,7 @@ int main(int argc, char *argv[], char *dummy[])
 	}
 	num_clients = 0;
 
-	/* Optionally run latency test */
+	/* Optionally skip latency measurement cases */
 	if (!latency_transf)
 		goto end_latency;
 
@@ -461,12 +528,13 @@ int main(int argc, char *argv[], char *dummy[])
 	       latency_transf, tcp_port ? "TCP" : "TIPC");
 
 	/* Create first child client and wait until it is connected */
-	client_create(++num_clients, tcp_port, tcp_addr);
+	client_main(++num_clients, tcp_port, tcp_addr);
 	master_from_client(&cmd);
 	sleep(1);
 	print_latency_header();
 	iter = 1;
 
+	/* Order client and server to run latency cases, one by one */
 	for (msglen = first_msglen; msglen <= last_msglen; msglen *= 4) {
 
 		unsigned long long latency;
@@ -503,8 +571,7 @@ int main(int argc, char *argv[], char *dummy[])
 
 end_latency:
 
-	/* Optionally run throughput test */
-
+	/* Optionally skip throughput measurement cases */
 	if (!thruput_transf)
 		goto end_thruput;
 
@@ -512,9 +579,8 @@ end_latency:
 	       thruput_transf, tcp_port ? "TCP" : "TIPC");
 
 	/* Create remaining child clients. For each, wait until it is ready */
-
 	while (num_clients < req_clients) {
-		client_create(++num_clients, tcp_port, tcp_addr);
+		client_main(++num_clients, tcp_port, tcp_addr);
 		master_from_client(&cmd);
 	}
 
@@ -524,6 +590,7 @@ end_latency:
 	print_throughput_header();
 	iter = 1;
 
+	/* Order clients and servers to run througput cases, one by one */
 	for (msglen = first_msglen; msglen <= last_msglen; msglen *= 4) {
 
 		unsigned long long thruput;
