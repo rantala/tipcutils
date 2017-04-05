@@ -144,7 +144,7 @@ void client_mcast(int sd, int lower, int upper)
  * message.
  */
 
-int main(int argc, char *argv[], char *envp[])
+int main(int argc, char *argv[])
 {
 	int lower;
 	int upper;

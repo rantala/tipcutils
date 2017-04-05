@@ -59,7 +59,7 @@
 	exit(EXIT_FAILURE);				\
 } while(0)
 
-int main(int argc, char *argv[], char *dummy[])
+int main(int argc, char *argv[])
 {
 	bool up;
 	tipc_domain_t neigh_node = 0, neigh_topsrvnode = 0;

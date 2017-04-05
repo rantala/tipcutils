@@ -52,7 +52,7 @@ char usage[] =
         "      -h      print help\n";
 
 
-int main(int argc, char* argv[], char* dummy[])
+int main(int argc, char* argv[])
 {
 	int c;
 

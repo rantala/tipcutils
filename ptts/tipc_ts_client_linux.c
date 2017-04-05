@@ -57,7 +57,7 @@ char usage[] =
         "      <test>  test number to run (0 => run all tests)\n";
 
 
-int main(int argc, char* argv[], char* dummy[])
+int main(int argc, char* argv[])
 {
 	int c;		           /* option being processed */
 	int test = -1;	       /* test number set to a value we will never get */

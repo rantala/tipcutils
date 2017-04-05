@@ -162,7 +162,7 @@ static int recv_seqpacket_setup(int sd)
 	return newsd;
 }
 
-int main(int argc, char *argv[], char *dummy[])
+int main(int argc, char *argv[])
 {
 	tipc_domain_t scope = tipc_own_cluster();
 	int rdmsd, strsd, pktsd;

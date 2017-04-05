@@ -176,7 +176,7 @@ static void seqpacket_service_demo(int sd, bool up)
 	printf("-------------------------------------\n");
 }
 
-int main(int argc, char *argv[], char *dummy[])
+int main(int argc, char *argv[])
 {
 	bool up;
 	tipc_domain_t srv_node = 0;

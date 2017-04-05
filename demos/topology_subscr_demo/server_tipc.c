@@ -49,7 +49,7 @@
 #define SERVER_INST_LOWER  6
 #define SERVER_INST_UPPER  53
 
-int main(int argc, char *argv[], char *dummy[])
+int main(int argc, char *argv[])
 {
 	struct sockaddr_tipc server_addr;
 	int sd;

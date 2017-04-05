@@ -98,7 +98,7 @@ void wait_for_server(__u32 name_type, __u32 name_instance, int wait)
 }
 
 
-int main(int argc, char *argv[], char *dummy[])
+int main(int argc, char *argv[])
 {
 	int sd;
 	struct sockaddr_tipc server_addr;

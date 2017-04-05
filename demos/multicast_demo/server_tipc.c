@@ -113,7 +113,7 @@ static void sig_child(int signo)
  * to the same value as "lower".
  */
 
-int main(int argc, char* argv[], char* envp[])
+int main(int argc, char* argv[])
 {
 	int lower;
 	int upper;

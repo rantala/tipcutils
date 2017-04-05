@@ -47,7 +47,7 @@
 #define SERVER_INST  17
 #define BUF_SIZE 40
 
-int main(int argc, char *argv[], char *dummy[])
+int main(int argc, char *argv[])
 {
 	struct sockaddr_tipc server_addr;
 	struct sockaddr_tipc client_addr;

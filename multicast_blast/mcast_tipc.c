@@ -185,7 +185,7 @@ void mcast_receiver_subscriber(void)
 	}
 }
 
-int main(int argc, char *argv[], char *envp[])
+int main(int argc, char *argv[])
 {
 	int c;
 	int len = 66000;

@@ -80,7 +80,7 @@ static void srv_from_master(uint *cmd, uint* msglen, uint *msgcnt, uint *echo)
 		*echo = ntohl(c.echo);
 }
 
-int main(int argc, char *argv[], char *dummy[])
+int main(int argc, char *argv[])
 {
 	ushort tcp_port = 4711;
 	struct srv_info sinfo;

@@ -214,7 +214,7 @@ int syntax(char *argv[])
 	return 1;
 }
 
-int main(int argc, char *argv[], char *envp[])
+int main(int argc, char *argv[])
 {
 	int option;
 	int len = 66000;

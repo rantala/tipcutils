@@ -397,7 +397,7 @@ static void client_main(unsigned int clnt_id, ushort tcp_port, int tcp_addr)
  * The master runs in (and is) the parent process
  * All code above in this file runs in (client) child processes
  */
-int main(int argc, char *argv[], char *dummy[])
+int main(int argc, char *argv[])
 {
 	int c;
 	uint cmd;
