@@ -688,6 +688,10 @@ int main(int argc, char *argv[])
 	init(argc, argv);
 	buf = malloc(buf_size);
 	tipc = socket(AF_TIPC, sock_type, 0);
+	if (tipc < 0) {
+		perror("socket()");
+		exit(EXIT_FAILURE);
+	}
 	chkne(getsockname(tipc, (void *)&name, &addr_size));
 	trvx_(name.addr.id.ref);
 	trln();
