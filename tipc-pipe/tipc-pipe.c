@@ -601,6 +601,8 @@ int init(int argc, char *argv[])
 int run_server(int tipc)
 {
 	trl();
+	/* avoid zombies */
+	if (signal(SIGCHLD, SIG_IGN) == SIG_ERR) perror("signal()");
 	chkne(bind(tipc, (void *)&addr_sk, sizeof(addr_sk)));
 	switch (sock_type) {
 	case SOCK_SEQPACKET:
