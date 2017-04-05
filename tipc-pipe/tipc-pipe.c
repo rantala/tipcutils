@@ -346,11 +346,19 @@ again:
 		break;
 	case multi_server:
 		chkne(peer_sd = accept(tipc, 0, 0));
-		if (!fork()) {
+		switch (fork()) {
+		case -1:
+			perror("fork() failed");
+			exit(EXIT_FAILURE);
+		case 0:
+			/* child */
 			ret = data_io(peer_sd);
 			shutdown(peer_sd, SHUT_RDWR);
 			close(peer_sd);
 			exit(0);
+		default:
+			/* parent */
+			break;
 		}
 		goto again;
 	default:
