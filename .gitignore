@@ -44,7 +44,6 @@ demos/c_api_demo/tipc_c_api_client
 demos/c_api_demo/tipc_c_api_server
 ptts/tipcTC
 ptts/tipcTS
-tipc-config/tipc-config
 tipc-pipe/tipc-pipe
 tipclog/tipclog
 multicast_blast/mcast_tipc
