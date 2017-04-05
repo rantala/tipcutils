@@ -47,3 +47,4 @@ ptts/tipcTS
 tipc-pipe/tipc-pipe
 tipclog/tipclog
 multicast_blast/mcast_tipc
+multicast_blast/group_cast
