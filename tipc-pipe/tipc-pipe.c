@@ -640,7 +640,7 @@ int run_client(int tipc)
 int run_topology_client(int lower, int upper, unsigned int timeout)
 {
 	struct sockaddr_tipc topsrv;
-	struct tipc_subscr subscr = { {0} };
+	struct tipc_subscr subscr;
 
 	int sd = socket(AF_TIPC, SOCK_SEQPACKET, 0);
 	const char *event_name [] = {
@@ -651,6 +651,7 @@ int run_topology_client(int lower, int upper, unsigned int timeout)
 
 	tipc_addr_set(&topsrv, TIPC_ADDR_NAME, TIPC_TOP_SRV, TIPC_TOP_SRV, 0);
 	chkne(connect(sd, (void *)&topsrv, sizeof(topsrv)));
+	memset(&subscr, 0, sizeof(subscr));
 	subscr.seq.type = htonl(server_type);
 	subscr.seq.lower = htonl(lower);
 	subscr.seq.upper = htonl(upper);
