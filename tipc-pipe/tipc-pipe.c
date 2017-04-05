@@ -358,6 +358,7 @@ again:
 			exit(0);
 		default:
 			/* parent */
+			close(peer_sd);
 			break;
 		}
 		goto again;
